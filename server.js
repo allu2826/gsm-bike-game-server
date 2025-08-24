@@ -4,7 +4,7 @@ const WebSocket = require('ws');
 const admin = require('firebase-admin');
 
 // IMPORTANT: This path is where Render will place your secret file.
-const SERVICE_ACCOUNT_PATH = './service-account-key.json';
+const SERVICE_ACCOUNT_PATH = '/etc/secrets/service-account-key.json';
 
 try {
     const serviceAccount = require(SERVICE_ACCOUNT_PATH);
@@ -148,3 +148,4 @@ try {
     console.error("FATAL SERVER ERROR:", e);
     console.error("This is likely due to a missing or invalid service-account-key.json file in your Render Environment settings.");
 }
+
