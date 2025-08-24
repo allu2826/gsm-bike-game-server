@@ -1,0 +1,14 @@
+{
+  "name": "replit-gs-game-bot",
+  "version": "1.0.0",
+  "description": "Discord bot for GSM Game key distribution",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.15.3",
+    "firebase-admin": "^12.1.1",
+    "express": "^4.19.2"
+  }
+}
