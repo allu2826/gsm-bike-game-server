@@ -9,7 +9,8 @@ const FIREBASE_SERVICE_ACCOUNT_STR = process.env.FIREBASE_SERVICE_ACCOUNT;
 //             DEPENDENCIES & SETUP
 // ===================================================
 const express = require('express');
-const { Client, GatewayIntentBits } = require('discord.js');
+const { Client, GatewayIntentBits, query } = require('discord.js');
+const { getFirestore, collection, where, getDocs, updateDoc } = require('firebase-admin/firestore');
 const admin = require('firebase-admin');
 const crypto = require('crypto');
 
@@ -22,7 +23,7 @@ const serviceAccount = JSON.parse(FIREBASE_SERVICE_ACCOUNT_STR);
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount)
 });
-const db = admin.firestore();
+const db = getFirestore();
 
 const client = new Client({
   intents: [
@@ -89,7 +90,7 @@ client.on('messageCreate', async message => {
   const newAdminKey = generateUniqueKey();
   try {
     await message.author.send(
-      `Here is your daily admin trial key:\n\n**\`${newAdminKey}\`**\n\nIt grants 10 minutes of admin access. Your 24-hour cooldown starts now.`
+      `Here is your daily admin trial key:\n\n**\`${newAdminKey}\`**\n\nIt grants 10 minutes of admin access. Your 24-hour cooldown starts now. If you leave the server, this key will be disabled.`
     );
 
     const batch = db.batch();
@@ -112,37 +113,48 @@ client.on('messageCreate', async message => {
   }
 });
 
-// NEW: LISTEN FOR WHEN A MEMBER LEAVES THE SERVER
+// UPDATED: LISTEN FOR WHEN A MEMBER LEAVES THE SERVER
 client.on('guildMemberRemove', async member => {
     const discordUserId = member.id;
-    console.log(`User ${member.user.tag} (ID: ${discordUserId}) left the server. Checking for linked game account.`);
+    console.log(`User ${member.user.tag} (ID: ${discordUserId}) left the server. Checking for keys to revoke.`);
 
     try {
-        const usersRef = db.collection('users');
-        const q = query(usersRef, where('discordId', '==', discordUserId), limit(1));
-        const snapshot = await getDocs(q);
+        // ACTION 1: Revoke any UNCLAIMED token given to this user
+        const tokensRef = collection(db, 'adminAccessTokens');
+        const tokenQuery = where('usedByDiscordId', '==', discordUserId, where('usedBy', '==', null));
+        const tokenSnapshot = await getDocs(tokenQuery);
 
-        if (snapshot.empty) {
-            console.log(`No game account linked for the user who left.`);
-            return;
+        if (!tokenSnapshot.empty) {
+            const tokenDoc = tokenSnapshot.docs[0]; // Should only ever be one
+            await updateDoc(tokenDoc.ref, {
+                usedBy: 'revoked_user_left_server'
+            });
+            console.log(`Successfully revoked unclaimed token ${tokenDoc.data().token} for user who left.`);
+        } else {
+            console.log(`No unclaimed tokens found for user ${discordUserId}.`);
         }
 
-        const userDoc = snapshot.docs[0];
-        const gameUserId = userDoc.id;
-        
-        // Expire their admin access by setting the expiry date to the past
-        await updateDoc(userDoc.ref, {
-            tempAdminExpiresAt: new Date(0) // Set to Jan 1, 1970
-        });
+        // ACTION 2: Expire any ACTIVE admin trial for a claimed key
+        const usersRef = collection(db, 'users');
+        const userQuery = where('discordId', '==', discordUserId);
+        const userSnapshot = await getDocs(userQuery);
 
-        console.log(`Successfully expired admin trial for game account ${gameUserId} because linked Discord user left.`);
+        if (!userSnapshot.empty) {
+            const userDoc = userSnapshot.docs[0];
+            await updateDoc(userDoc.ref, {
+                tempAdminExpiresAt: new Date(0) // Set to Jan 1, 1970
+            });
+            console.log(`Successfully expired active admin trial for game account ${userDoc.id}.`);
+        } else {
+            console.log(`No linked game account found for user ${discordUserId}.`);
+        }
 
     } catch (error) {
-        // This error will likely happen the first time because the database index is missing.
-        console.error("Error expiring key for user who left:", error.message);
-        console.error("IMPORTANT: If this is a 'query requires an index' error, you MUST create it. Check the Firebase console or the error log for a link to create the index automatically.");
+        console.error("Error handling user leave event:", error.message);
+        console.error("IMPORTANT: If this is a 'query requires an index' error, you MUST create the required index in Firebase. Check the logs for a link.");
     }
 });
+
 
 // ===================================================
 //                  LOGIN TO DISCORD
